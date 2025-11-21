@@ -31,7 +31,7 @@ int  passiveTCP(const char *service, int qlen);
 int s_control;
 char g_host[128] = "localhost";
 
-/* ---------------- utilidades de lectura/envío (robustas) ---------------- */
+/* ---------------- utilidades de lectura/envío ---------------- */
 
 /* read_line: lee hasta '\n' (incluye '\n' en el buffer). Devuelve bytes leídos o -1/0 */
 ssize_t read_line(int fd, char *buf, size_t max) {
@@ -54,9 +54,7 @@ ssize_t read_line(int fd, char *buf, size_t max) {
     return (ssize_t)n;
 }
 
-/* expect_reply: lee reply completo del canal de control (incluye multilínea RFC959).
- * out debe tener tamaño outsz. Devuelve código numérico (p.ej. 220) o -1 en error.
- */
+/* expect_reply: lee reply completo del canal de control (incluye multilínea RFC959).*/
 int expect_reply(int ctrl_sock, char *out, size_t outsz) {
     char line[LINELEN];
     out[0] = '\0';
@@ -67,7 +65,6 @@ int expect_reply(int ctrl_sock, char *out, size_t outsz) {
     while (1) {
         ssize_t r = read_line(ctrl_sock, line, sizeof(line));
         if (r <= 0) return -1;
-        /* concatenar con seguridad */
         if (strlen(out) + strlen(line) + 1 < outsz) strncat(out, line, outsz - strlen(out) - 1);
 
         /* detección de multiline */
@@ -78,10 +75,8 @@ int expect_reply(int ctrl_sock, char *out, size_t outsz) {
                 code = (code_str[0]-'0')*100 + (code_str[1]-'0')*10 + (code_str[2]-'0');
                 first = 0;
                 if (strlen(line) >= 4 && line[3] == '-') {
-                    /* multiline, seguir leyendo */
                     continue;
                 } else {
-                    /* single-line reply -> terminado */
                     break;
                 }
             } else {
@@ -97,16 +92,13 @@ int expect_reply(int ctrl_sock, char *out, size_t outsz) {
     return code;
 }
 
-/* send_cmd: enviar comando y leer reply completo. Rellenar out con reply.
- * Devuelve código numérico o -1 en error.
- */
+/* send_cmd: enviar comando y leer reply completo. Rellenar out con reply. */
 int send_cmd(int sock, char *out, size_t outsz, const char *fmt, ...) {
     char cmd[LINELEN];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(cmd, sizeof(cmd) - 3, fmt, ap);
     va_end(ap);
-    /* asegurar CRLF */
     if (strlen(cmd) + 3 < sizeof(cmd)) strncat(cmd, "\r\n", sizeof(cmd) - strlen(cmd) - 1);
 
     size_t tosend = strlen(cmd);
@@ -121,16 +113,13 @@ int send_cmd(int sock, char *out, size_t outsz, const char *fmt, ...) {
         sent += (size_t)s;
     }
 
-    /* leer reply */
     int code = expect_reply(sock, out, outsz);
     return code;
 }
 
-/* ---------------- PASV y PORT robustos ---------------- */
+/* ---------------- PASV y PORT ---------------- */
 
-/* pasivo_conn: pide PASV, parsea respuesta, y conecta al host:port devuelto.
- * Devuelve socket de datos conectado o -1 en error.
- */
+/* pasivo_conn: pide PASV, parsea respuesta, y conecta al host:port devuelto. */
 int pasivo_conn(int ctrl_sock) {
     char reply[LINELEN];
     int code = send_cmd(ctrl_sock, reply, sizeof(reply), "PASV");
@@ -162,35 +151,28 @@ int pasivo_conn(int ctrl_sock) {
     return sdata;
 }
 
-/* configurar_port: crea socket de escucha efímero y forma comando PORT correcto
- * usando la IP local de la conexión de control (getsockname sobre s_control).
- * s_listen será el socket de escucha; port_cmd se rellena con "PORT a,b,c,d,p1,p2".
- * Devuelve 0 éxito o -1 error.
- */
+/* configurar_port: crea socket de escucha efímero y forma comando PORT correcto */
 int configurar_port(int *s_listen, char *port_cmd, size_t port_cmd_sz) {
     struct sockaddr_in sin;
     socklen_t len = sizeof(sin);
     int s, opt = 1;
 
-    /* Crear socket manualmente en lugar de usar passiveTCP */
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) {
         perror("socket");
         return -1;
     }
 
-    /* Permitir reusar la dirección */
     if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         perror("setsockopt");
         close(s);
         return -1;
     }
 
-    /* Bind a puerto 0 (puerto efímero asignado por el SO) */
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = INADDR_ANY;
-    sin.sin_port = 0;  /* Puerto 0 = puerto efímero */
+    sin.sin_port = 0; 
 
     if (bind(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
         perror("bind");
@@ -198,7 +180,6 @@ int configurar_port(int *s_listen, char *port_cmd, size_t port_cmd_sz) {
         return -1;
     }
 
-    /* Listen */
     if (listen(s, QLEN) < 0) {
         perror("listen");
         close(s);
@@ -207,7 +188,6 @@ int configurar_port(int *s_listen, char *port_cmd, size_t port_cmd_sz) {
 
     *s_listen = s;
 
-    /* Obtener el puerto asignado */
     len = sizeof(sin);
     if (getsockname(s, (struct sockaddr *)&sin, &len) < 0) {
         perror("getsockname(listen)");
@@ -218,7 +198,6 @@ int configurar_port(int *s_listen, char *port_cmd, size_t port_cmd_sz) {
     int p1 = port_num / 256;
     int p2 = port_num % 256;
 
-    /* Obtener IP local usada en s_control */
     struct sockaddr_in localaddr;
     socklen_t locallen = sizeof(localaddr);
     if (getsockname(s_control, (struct sockaddr*)&localaddr, &locallen) < 0) {
@@ -228,7 +207,6 @@ int configurar_port(int *s_listen, char *port_cmd, size_t port_cmd_sz) {
     }
     unsigned char *ip = (unsigned char *)&localaddr.sin_addr.s_addr;
     
-    /* Formar comando PORT */
     snprintf(port_cmd, port_cmd_sz, "PORT %u,%u,%u,%u,%d,%d",
              ip[0], ip[1], ip[2], ip[3], p1, p2);
     
@@ -262,7 +240,6 @@ char* read_password(const char *prompt) {
     printf("%s", prompt);
     fflush(stdout);
     
-    // Deshabilitar echo
     if (tcgetattr(STDIN_FILENO, &old) != 0) {
         perror("tcgetattr");
         return NULL;
@@ -279,7 +256,6 @@ char* read_password(const char *prompt) {
     }
     password[strcspn(password, "\r\n")] = '\0';
     
-    // Restaurar echo
     tcsetattr(STDIN_FILENO, TCSANOW, &old);
     printf("\n");
     
@@ -296,28 +272,23 @@ int main(int argc, char *argv[]) {
     FILE *fp;
     pid_t pid;
 
-    /* manejo de argumentos: host [port] */
     if (argc >= 2) {
         strncpy(g_host, argv[1], sizeof(g_host)-1);
         g_host[sizeof(g_host)-1] = '\0';
     }
     const char *service = (argc >= 3) ? argv[2] : "ftp";
 
-    /* instalar handler SIGCHLD */
     struct sigaction sa;
     sa.sa_handler = reaper;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
     if (sigaction(SIGCHLD, &sa, NULL) == -1) {
         perror("sigaction");
-        /* no fatal, continuar */
     }
 
-    /* conectar control */
     s_control = connectTCP(g_host, service);
     if (s_control < 0) errexit("No pudo conectar a %s:%s\n", g_host, service);
 
-    /* leer greeting */
     if (expect_reply(s_control, reply, sizeof(reply)) < 0) {
         close(s_control);
         errexit("Error leyendo greeting del servidor\n");
@@ -339,7 +310,6 @@ int main(int argc, char *argv[]) {
         printf("%s", reply);
 
         if (code == 230) break; /* login correcto */
-        /* si 3xx -> continuar, 5xx -> retry */
     }
 
     /* asegurar modo binario para transferencias */
@@ -414,7 +384,6 @@ int main(int argc, char *argv[]) {
             }
             
             if (pid == 0) {
-                /* HIJO: recibe y escribe archivo */
                 FILE *fp_child = fopen(arg, "wb");
                 if (!fp_child) { 
                     perror("fopen"); 
@@ -429,10 +398,8 @@ int main(int argc, char *argv[]) {
                 fclose(fp_child);
                 close(sdata);
                 
-                /* Hijo NO lee del socket de control - el padre lo hará */
                 exit(0);
             } else {
-                /* PADRE: cierra socket de datos y lee respuesta final */
                 close(sdata);
                 printf("Transferencia GET iniciada (PID %d)\n", pid);
                 
@@ -466,7 +433,6 @@ int main(int argc, char *argv[]) {
                 continue; 
             }
             
-            /* Cerrar fp antes del fork para evitar confusión */
             fclose(fp);
             
             pid = fork();
@@ -477,7 +443,6 @@ int main(int argc, char *argv[]) {
             }
             
             if (pid == 0) {
-                /* HIJO: enviar archivo */
                 FILE *fp_child = fopen(arg, "rb");
                 if (!fp_child) { 
                     perror("fopen child"); 
@@ -504,11 +469,9 @@ int main(int argc, char *argv[]) {
                 close(sdata);
                 exit(0);
             } else {
-                /* PADRE: leer respuesta final */
                 close(sdata);
                 printf("Transferencia PUT iniciada (PID %d)\n", pid);
                 
-                /* Leer respuesta final 226 */
                 if (expect_reply(s_control, reply, sizeof(reply)) >= 0) {
                     printf("%s", reply);
                 }
@@ -558,7 +521,6 @@ int main(int argc, char *argv[]) {
             }
             
             if (pid == 0) {
-                /* HIJO: acepta y envía */
                 struct sockaddr_in remote;
                 socklen_t alen = sizeof(remote);
                 int sdata_child = accept(s_listen, (struct sockaddr*)&remote, &alen);
@@ -593,11 +555,9 @@ int main(int argc, char *argv[]) {
                 close(sdata_child);
                 exit(0);
             } else {
-                /* PADRE: leer respuesta final */
                 close(s_listen);
                 printf("Transferencia PPUT iniciada (PID %d)\n", pid);
                 
-                /* Leer respuesta final 226 */
                 if (expect_reply(s_control, reply, sizeof(reply)) >= 0) {
                     printf("%s", reply);
                 }
