@@ -1,0 +1,13 @@
+# Ejecutables
+clienteFTP
+*.o
+
+# Archivos de prueba
+test_files/
+*.txt
+*.bin
+*.log
+
+# Temporales
+*~
+.*.swp
